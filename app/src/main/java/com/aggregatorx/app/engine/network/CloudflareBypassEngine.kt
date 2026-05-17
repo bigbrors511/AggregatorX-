@@ -35,7 +35,8 @@ class CloudflareBypassEngine @Inject constructor() {
     companion object {
         private const val MAX_CHALLENGE_RETRIES = 3
         private const val CHALLENGE_WAIT_MS = 5500L  // Cloudflare's typical 5-second challenge
-        private const val BYPASS_CACHE_TTL_MS = 30 * 60 * 1000L  // 30 minutes
+        // Reduced TTL to ensure sessions don't get stale and we always see "fresh" site results
+        private const val BYPASS_CACHE_TTL_MS = 10 * 60 * 1000L  // 10 minutes
 
         // Cloudflare challenge indicators
         private val CF_CHALLENGE_MARKERS = listOf(
@@ -464,5 +465,5 @@ data class BypassToken(
     val timestamp: Long = System.currentTimeMillis()
 ) {
     fun isExpired(): Boolean =
-        System.currentTimeMillis() - timestamp > 30 * 60 * 1000L
+        System.currentTimeMillis() - timestamp > 10 * 60 * 1000L
 }

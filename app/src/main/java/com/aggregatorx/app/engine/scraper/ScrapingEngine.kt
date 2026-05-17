@@ -9,6 +9,7 @@ import com.aggregatorx.app.engine.analyzer.PageType
 import com.aggregatorx.app.engine.analyzer.ContainerType
 import com.aggregatorx.app.engine.analyzer.EndpointDiscoveryEngine
 import com.aggregatorx.app.engine.ai.AIDecisionEngine
+import com.aggregatorx.app.engine.token.TokenManager
 import com.aggregatorx.app.engine.nlp.NaturalLanguageQueryProcessor
 import com.aggregatorx.app.engine.nlp.ProcessedQuery
 import com.aggregatorx.app.engine.network.CloudflareBypassEngine
@@ -46,7 +47,8 @@ class ScrapingEngine @Inject constructor(
     private val aiDecisionEngine: AIDecisionEngine,
     private val cloudflareBypassEngine: CloudflareBypassEngine,
     private val endpointDiscoveryEngine: EndpointDiscoveryEngine,
-    private val nlpProcessor: NaturalLanguageQueryProcessor
+    private val nlpProcessor: NaturalLanguageQueryProcessor,
+    private val tokenManager: TokenManager
 ) {
     @Volatile
     private var currentProcessedQuery: ProcessedQuery? = null
@@ -107,12 +109,10 @@ class ScrapingEngine @Inject constructor(
         val processedQuery = nlpProcessor.processQuery(query)
         currentProcessedQuery = processedQuery
 
+        // Fulfill requirement: each search gets fresh results. 
+        // If it's not a pagination request (cache=false usually implies load more), we clear existing cache for this query.
         if (cache) {
-            val cachedEntry = synchronized(resultCache) { resultCache[query] }
-            if (cachedEntry != null && System.currentTimeMillis() - cachedEntry.timestamp < CACHE_TTL_MS) {
-                cachedEntry.results.forEach { emit(it) }
-                return@flow
-            }
+            synchronized(resultCache) { resultCache.remove(query) }
         }
 
         var enabledProviders = providerDao.getEnabledProvidersSync()
@@ -287,14 +287,27 @@ class ScrapingEngine @Inject constructor(
             enforceRateLimit(provider.id)
             providerDao.incrementSearchCount(provider.id)
 
-            // 1. Search URL Discovery
-            val smartSearchUrl = smartNavigationEngine.findSearchUrl(provider.baseUrl, effectiveQuery)
-            if (smartSearchUrl != null) {
-                val results = scrapeWithSmartNavigation(provider, query, smartSearchUrl)
-                if (results.isNotEmpty()) {
-                    updateProviderHealth(provider.id, true, System.currentTimeMillis() - startTime)
-                    return ProviderSearchResults(provider, results, System.currentTimeMillis() - startTime, true)
+            // Loop 1: Fresh Deep Search (fetches pages 1 & 2 immediately)
+            val deepLinks = smartNavigationEngine.performFreshDeepSearch(provider.baseUrl, effectiveQuery)
+            if (deepLinks.isNotEmpty()) {
+                val results = deepLinks.map { link ->
+                    SearchResult(
+                        providerId = provider.id,
+                        providerName = provider.name,
+                        title = link.title,
+                        url = link.url,
+                        thumbnailUrl = link.thumbnail,
+                        relevanceScore = calculateRelevanceScore(link.title, effectiveQuery, null, link.url)
+                    )
                 }
+                updateProviderHealth(provider.id, true, System.currentTimeMillis() - startTime)
+                
+                // Automated Token Discovery & Replay Loop (triggered in background or parallel)
+                CoroutineScope(Dispatchers.IO).launch {
+                    tokenManager.runAutomatedTokenLoop(provider.baseUrl, effectiveQuery)
+                }
+                
+                return ProviderSearchResults(provider, results, System.currentTimeMillis() - startTime, true)
             }
 
             // 2. Tab Crawling (for sites without search)

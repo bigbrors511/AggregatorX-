@@ -83,6 +83,18 @@ class TokenManager @Inject constructor(
         }
     }
 
+    /**
+     * Full automated token discovery loop: Harvest → Mutate/Fuzz → Replay.
+     * Returns a list of all unique result URLs discovered through the entire chain.
+     */
+    suspend fun runAutomatedTokenLoop(baseUrl: String, query: String): List<String> = withContext(Dispatchers.IO) {
+        val bundle = harvestTokens(baseUrl)
+        // Additional loop: replay with harvested tokens (modifier logic included in search injection)
+        val discoveryResults = replayTokensForSearch(baseUrl, query)
+        Log.d(TAG, "Automated token loop for ${extractHost(baseUrl)} discovered ${discoveryResults.size} new results")
+        discoveryResults
+    }
+
     /** Replay stored tokens against a search URL, returning any new result URLs found. */
     suspend fun replayTokensForSearch(baseUrl: String, query: String): List<String> = withContext(Dispatchers.IO) {
         val host = extractHost(baseUrl)

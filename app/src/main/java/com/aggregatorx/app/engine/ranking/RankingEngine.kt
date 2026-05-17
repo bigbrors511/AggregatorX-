@@ -3,6 +3,7 @@ package com.aggregatorx.app.engine.ranking
 import com.aggregatorx.app.data.model.AggregatedSearchResults
 import com.aggregatorx.app.data.model.ProviderSearchResults
 import com.aggregatorx.app.data.model.SearchResult
+import com.aggregatorx.app.engine.ai.AIDecisionEngine
 import com.aggregatorx.app.engine.nlp.NaturalLanguageQueryProcessor
 import com.aggregatorx.app.engine.nlp.ProcessedQuery
 import com.aggregatorx.app.engine.util.EngineUtils
@@ -36,7 +37,8 @@ import kotlin.math.min
  */
 @Singleton
 class RankingEngine @Inject constructor(
-    private val nlpProcessor: NaturalLanguageQueryProcessor
+    private val nlpProcessor: NaturalLanguageQueryProcessor,
+    private val aiEngine: AIDecisionEngine
 ) {
 
     // ── User preference data (set before each ranking call) ─────────────
@@ -46,6 +48,7 @@ class RankingEngine @Inject constructor(
     private var preferredProviders: Map<String, Float> = emptyMap()
     private var preferredQualities: Map<String, Float> = emptyMap()
     private var likedUrls: Set<String> = emptySet()
+    private var tokenDiscoveredUrls: Set<String> = emptySet()
 
     // NLP processed query set by the search pipeline before ranking
     @Volatile
@@ -67,12 +70,14 @@ class RankingEngine @Inject constructor(
         keywords: Map<String, Float> = emptyMap(),
         providers: Map<String, Float> = emptyMap(),
         qualities: Map<String, Float> = emptyMap(),
-        liked: Set<String> = emptySet()
+        liked: Set<String> = emptySet(),
+        tokenResults: Set<String> = emptySet()
     ) {
         preferredKeywords = keywords
         preferredProviders = providers
         preferredQualities = qualities
         likedUrls = liked
+        tokenDiscoveredUrls = tokenResults
     }
     
     companion object {
@@ -94,6 +99,7 @@ class RankingEngine @Inject constructor(
         private const val SYNONYM_MATCH_BONUS = 7f
         private const val URL_PATH_MATCH_BONUS = 6f
         private const val NGRAM_MATCH_BONUS = 5f
+        private const val TOKEN_DISCOVERY_BONUS = 25f
         
         // Minimum score thresholds — on the SAME 0-100 scale as calculateFinalScore
         private const val MIN_SCORE_FOR_TOP = 15.0f
@@ -177,10 +183,14 @@ class RankingEngine @Inject constructor(
      */
     fun rankAndAggregate(
         query: String,
-        providerResults: List<ProviderSearchResults>
+        providerResults: List<ProviderSearchResults>,
+        isNewSearch: Boolean = true
     ): AggregatedSearchResults {
         val startTime = System.currentTimeMillis()
         
+        // Ensure every search is fresh. For new searches, we reset transient query processing.
+        if (isNewSearch) { currentProcessedQuery = null }
+
         // Separate successful and failed providers
         val successfulProviders = providerResults.filter { it.success }
         val failedProviders = providerResults.filter { !it.success }
@@ -402,6 +412,11 @@ class RankingEngine @Inject constructor(
                 engagementScore * WEIGHT_ENGAGEMENT +
                 qualityScore * WEIGHT_QUALITY) * 100f
 
+        // ── AI Quality Deep-Learning Boost ──────────────────────────────
+        // Integrate AI Engine quality calculation to refine the top results.
+        val aiQualityScore = aiEngine.calculateQualityScore(result)
+        baseScore = (baseScore * 0.85f + aiQualityScore * 15f).coerceIn(0f, 100f)
+
         // ── User Preference Boost (from liked results) ─────────────────
         // Boost results that match learned user preferences.
         // This only affects Top Results scoring — provider sections are untouched.
@@ -410,6 +425,11 @@ class RankingEngine @Inject constructor(
         // Already-liked results get the biggest push to the top
         if (result.url in likedUrls) {
             prefBoost += 15f
+        }
+
+        // Token Discovery Boost: Prioritize results found via automated token loops
+        if (result.url in tokenDiscoveredUrls) {
+            prefBoost += TOKEN_DISCOVERY_BONUS
         }
 
         // Keyword preference boost: title words that appear in liked history

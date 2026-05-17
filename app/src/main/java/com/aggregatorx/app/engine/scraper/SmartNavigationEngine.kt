@@ -161,6 +161,49 @@ class SmartNavigationEngine @Inject constructor() {
         )
 
     /**
+     * Performs a fresh, deep search for a site by fetching multiple pages immediately.
+     * This fulfills the "First Loop" requirement where the app displays both the 
+     * initial results and the second page results as if they were viewed directly on the site.
+     */
+    suspend fun performFreshDeepSearch(
+        baseUrl: String,
+        query: String,
+        fetchSecondPage: Boolean = true
+    ): List<ContentLink> = withContext(Dispatchers.IO) {
+        val searchUrl = findSearchUrl(baseUrl, query) ?: return@withContext emptyList()
+        val allLinks = mutableListOf<ContentLink>()
+        val seen = mutableSetOf<String>()
+
+        try {
+            // Loop 1: Fetch Page 1
+            val page1Doc = Jsoup.connect(searchUrl)
+                .userAgent(DEFAULT_USER_AGENT)
+                .timeout(DEFAULT_TIMEOUT)
+                .get()
+            
+            extractContentLinks(page1Doc, baseUrl).forEach { 
+                if (seen.add(it.url)) allLinks.add(it)
+            }
+
+            // Immediate Loop 1.5: Fetch Page 2 (The "second or real page during the first")
+            if (fetchSecondPage) {
+                val pagination = getPaginationLinks(page1Doc, baseUrl, maxPages = 1)
+                if (pagination.isNotEmpty()) {
+                    val page2Url = pagination.first()
+                    val page2Doc = Jsoup.connect(page2Url)
+                        .userAgent(DEFAULT_USER_AGENT)
+                        .timeout(DEFAULT_TIMEOUT)
+                        .get()
+                    extractContentLinks(page2Doc, baseUrl).forEach {
+                        if (seen.add(it.url)) allLinks.add(it)
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        allLinks
+    }
+
+    /**
      * Attempt to close popups/ads with retries and escalation
      */
     suspend fun closePopupsWithRetries(page: Document, maxRetries: Int = 3): Boolean {
