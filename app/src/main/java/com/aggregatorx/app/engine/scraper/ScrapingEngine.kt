@@ -109,9 +109,9 @@ class ScrapingEngine @Inject constructor(
         val processedQuery = nlpProcessor.processQuery(query)
         currentProcessedQuery = processedQuery
 
-        // Fulfill requirement: each search gets fresh results. 
-        // If it's not a pagination request (cache=false usually implies load more), we clear existing cache for this query.
-        if (cache) {
+        // If the caller explicitly requests to bypass cache (cache=false), 
+        // we remove any existing entry to force a fresh fetch from provider sites.
+        if (!cache) {
             synchronized(resultCache) { resultCache.remove(query) }
         }
 

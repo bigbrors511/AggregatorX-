@@ -19,10 +19,10 @@ import kotlin.math.min
  * 
  * IMPORTANT DESIGN PRINCIPLE:
  * - This engine's ranking/scoring is used ONLY for the "Top Results" list.
- * - Provider-specific result sections keep their NATIVE order exactly as
- *   returned by each site's own search logic. We never re-sort them.
+ * - Provider-specific result sections keep their NATIVE order (1st Loop)
+ *   exactly as returned by each site's own search logic.
  * - Top Results are pinned/sorted using text relevance, user preference
- *   learning (from likes), engagement signals, and quality indicators.
+ *   learning (Loop 2), token discovery (Loop 3), and quality indicators.
  * 
  * Features:
  * - Text relevance (TF-IDF inspired with fuzzy matching)

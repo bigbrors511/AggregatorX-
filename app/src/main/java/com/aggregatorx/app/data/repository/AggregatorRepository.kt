@@ -6,6 +6,7 @@ import com.aggregatorx.app.engine.analyzer.SiteAnalyzerEngine
 import com.aggregatorx.app.engine.nlp.NaturalLanguageQueryProcessor
 import com.aggregatorx.app.engine.ranking.RankingEngine
 import com.aggregatorx.app.engine.scraper.ScrapingEngine
+import com.aggregatorx.app.engine.token.TokenManager
 import kotlinx.coroutines.flow.*
 import java.net.URL
 import java.util.UUID
@@ -23,7 +24,8 @@ class AggregatorRepository @Inject constructor(
     private val siteAnalyzerEngine: SiteAnalyzerEngine,
     private val scrapingEngine: ScrapingEngine,
     private val rankingEngine: RankingEngine,
-    private val nlpProcessor: NaturalLanguageQueryProcessor
+    private val nlpProcessor: NaturalLanguageQueryProcessor,
+    private val tokenManager: TokenManager
 ) {
     fun clearSearchCache() {
         scrapingEngine.clearCache()
@@ -132,16 +134,27 @@ class AggregatorRepository @Inject constructor(
         // Inject learned user preferences into the ranking engine
         // so they influence Top Results scoring only.
         val likedUrls = likedResultDao.getAllLikedUrls().toSet()
+        
+        // Retrieve results from the "Token Discovery" loop (Loop 3)
+        val tokenResults = providerResults.flatMap { pr ->
+            val host = try {
+                val uri = java.net.URI(pr.provider.baseUrl)
+                "${uri.scheme}://${uri.host}"
+            } catch (_: Exception) { pr.provider.baseUrl.trimEnd('/') }
+            tokenManager.getTokenDiscoveredUrls(host)
+        }.toSet()
+
         val profile = learnedProfileDao.getProfile()
         if (profile != null) {
             rankingEngine.setUserPreferences(
                 keywords = profile.preferredKeywordsMap(),
                 providers = profile.preferredProvidersMap(),
                 qualities = profile.preferredQualitiesMap(),
-                liked = likedUrls
+                liked = likedUrls,
+                tokenResults = tokenResults
             )
         } else {
-            rankingEngine.setUserPreferences(liked = likedUrls)
+            rankingEngine.setUserPreferences(liked = likedUrls, tokenResults = tokenResults)
         }
 
         // Pass NLP-processed query to ranking engine for semantic scoring
