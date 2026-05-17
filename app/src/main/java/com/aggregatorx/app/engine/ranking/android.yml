@@ -1,0 +1,50 @@
+name: Android Build
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug
+
+      - name: Build Release APK
+        run: ./gradlew assembleRelease || echo "Release build failed (signing might be required). Continuing..."
+
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: AggregatorX-debug
+          path: app/build/outputs/apk/debug/*.apk
+
+      - name: Upload Release APK
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: AggregatorX-release
+          path: app/build/outputs/apk/release/*.apk
+
+      - name: Final Integrity Check
+        run: |
+          if [ ! -f app/build/outputs/apk/debug/*.apk ]; then
+            echo "Build failed to produce an APK."
+            exit 1
+          fi

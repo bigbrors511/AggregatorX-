@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.webkit.ValueCallback
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import com.aggregatorx.app.engine.util.EngineUtils
@@ -25,6 +27,7 @@ class HeadlessBrowserHelper @Inject constructor(
     private val mainHandler = Handler(Looper.getMainLooper())
 
     companion object {
+        // Static accessors for compatibility with existing engine calls
         private var instance: HeadlessBrowserHelper? = null
 
         fun init(helper: HeadlessBrowserHelper) {
@@ -78,10 +81,11 @@ class HeadlessBrowserHelper @Inject constructor(
                     
                     mainHandler.postDelayed({
                         view?.evaluateJavascript(script) { result ->
+                            // Unescape JSON string returned by evaluateJavascript
                             deferred.complete(result?.trim('"')?.replace("\\u003C", "<")?.replace("\\\"", "\""))
                             view.destroy()
                         }
-                    }, 2000)
+                    }, 2000) // Allow 2s for JS rendering
                 }
             }
         }
